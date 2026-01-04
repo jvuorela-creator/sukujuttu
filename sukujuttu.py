@@ -1,24 +1,16 @@
 import streamlit as st
-from audio_recorder_streamlit import audio_recorder # <--- TÄMÄ VAIHTUI
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email.mime.text import MIMEText
-from email import encoders
+from audio_recorder_streamlit import audio_recorder
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload # <--- UUSI TUONTI
+import io
+import datetime
 import random
 
-# --- DEBUG ALKAA (poista tämä kun toimii) ---
-try:
-    user = st.secrets["EMAIL_USER"]
-    pwd = st.secrets["EMAIL_PASSWORD"]
-    st.warning(f"DEBUG: Yritetään lähettää tililtä: {user}")
-    st.warning(f"DEBUG: Salasanan pituus on: {len(pwd)} merkkiä (pitäisi olla 16)")
-except Exception as e:
-    st.error(f"DEBUG VIRHE: Asetuksia ei löydy! {e}")
-# --- DEBUG LOPPU ---
-
 # --- ASETUKSET ---
-st.set_page_config(page_title="Sukumuistot", page_icon="🎙️")
+st.set_page_config(page_title="Sukumuistot Driveen", page_icon="💾")
+
+TARGET_FOLDER_NAME = "Sukumuistot"
 
 KYSYMYKSET = [
     "Kuka oli paras ystäväsi lapsuudessa?",
@@ -26,51 +18,94 @@ KYSYMYKSET = [
     "Kerro ensimmäisestä koulupäivästäsi.",
     "Millainen oli isäsi/äitisi luonne?",
     "Mikä on ollut elämäsi onnellisin hetki?",
-    "Millaista oli asua lapsuudenkodissasi?",
 ]
 
-# --- SÄHKÖPOSTIN LÄHETYSFUNKTIO ---
-def send_email(recipient_email, subject, body, audio_data):
+# --- GOOGLE DRIVE -YHTEYDET ---
+
+def get_drive_service():
+    """Luo ja palauttaa Drive-yhteyden"""
+    creds_dict = dict(st.secrets)
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict,
+        scopes=['https://www.googleapis.com/auth/drive']
+    )
+    return build('drive', 'v3', credentials=creds)
+
+def get_folder_id(service, folder_name):
+    """Etsii kansion ID:n nimen perusteella"""
+    results = service.files().list(
+        q=f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder'",
+        fields="files(id, name)").execute()
+    items = results.get('files', [])
+    if not items:
+        return None
+    return items[0]['id']
+
+def save_to_drive(audio_bytes, filename):
+    """Tallentaa tiedoston Driveen"""
     try:
-        sender_email = st.secrets["EMAIL_USER"]
-        password = st.secrets["EMAIL_PASSWORD"]
-    except FileNotFoundError:
-        st.error("Sähköpostiasetukset (secrets) puuttuvat!")
-        return False
+        service = get_drive_service()
+        folder_id = get_folder_id(service, TARGET_FOLDER_NAME)
 
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = recipient_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
-
-    # Liitetään äänitiedosto
-    part = MIMEBase('application', 'octet-stream')
-    part.set_payload(audio_data)
-    encoders.encode_base64(part)
-    part.add_header('Content-Disposition', 'attachment; filename="muisto.wav"')
-    msg.attach(part)
-
-    try:
-        # --- MUUTOS ALKAA TÄSTÄ ---
-        # Käytetään SMTP_SSL ja porttia 465. Tämä on varmempi tapa pilvessä.
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        # Huom: server.starttls() -komentoa EI tarvita tässä.
+        if not folder_id:
+            st.error(f"Kansiota '{TARGET_FOLDER_NAME}' ei löytynyt!")
+            return False
         
-        server.login(sender_email, password)
-        text = msg.as_string()
-        server.sendmail(sender_email, recipient_email, text)
-        server.quit()
-        # --- MUUTOS LOPPUU ---
+        file_metadata = {'name': filename, 'parents': [folder_id]}
+        media = MediaIoBaseUpload(io.BytesIO(audio_bytes), mimetype='audio/wav')
+        
+        service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         return True
     except Exception as e:
-        # Tulostetaan tarkempi virheilmoitus ruudulle
-        st.error(f"Virhe lähetyksessä: {e}")
+        st.error(f"Virhe Drive-tallennuksessa: {e}")
         return False
+
+def list_and_play_files():
+    """Hakee viimeisimmät tiedostot ja näyttää soittimet"""
+    try:
+        service = get_drive_service()
+        folder_id = get_folder_id(service, TARGET_FOLDER_NAME)
+        
+        if not folder_id:
+            return
+
+        # Haetaan kansion tiedostot (viimeiset 10)
+        results = service.files().list(
+            q=f"'{folder_id}' in parents and mimeType != 'application/vnd.google-apps.folder'",
+            orderBy="createdTime desc",
+            pageSize=10,
+            fields="files(id, name, createdTime)").execute()
+        
+        items = results.get('files', [])
+
+        if not items:
+            st.info("Ei vielä tallennettuja muistoja.")
+            return
+
+        st.subheader("🎧 Kuuntele muiden muistoja")
+        
+        # Loopataan tiedostot läpi
+        for item in items:
+            with st.expander(f"📁 {item['name']}"):
+                # Ladataan ääni muistiin
+                request = service.files().get_media(fileId=item['id'])
+                fh = io.BytesIO()
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while done is False:
+                    status, done = downloader.next_chunk()
+                
+                # Soitetaan ääni
+                st.audio(fh.getvalue(), format="audio/wav")
+
+    except Exception as e:
+        st.error(f"Virhe tiedostojen lataamisessa: {e}")
 
 # --- KÄYTTÖLIITTYMÄ ---
 
-st.markdown("<h1 style='text-align: center; color: #2E86C1;'>🎙️ Sukumuistot Talteen</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color: #2E86C1;'>💾 Sukumuistot Talteen</h1>", unsafe_allow_html=True)
+st.caption(f"Tallennuspaikka: Google Drive / {TARGET_FOLDER_NAME}")
+
 st.divider()
 
 if 'current_question' not in st.session_state:
@@ -80,45 +115,46 @@ if st.button("🔄 Vaihda kysymys"):
     st.session_state['current_question'] = random.choice(KYSYMYKSET)
 
 st.markdown(f"""
-<div style='background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;'>
-    <h2 style='color: #333;'>{st.session_state['current_question']}</h2>
+<div style='background-color: #e8f4f8; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;'>
+    <h3 style='color: #333;'>{st.session_state['current_question']}</h3>
 </div>
 """, unsafe_allow_html=True)
 
 # --- NAUHOITUS ---
-st.subheader("1. Nauhoita vastaus")
-st.write("Klikkaa mikrofonia nauhoittaaksesi. Klikkaa uudestaan lopettaaksesi.")
-
-# --- TÄMÄ OSA VAIHTUI (Uusi kirjasto) ---
+st.write("🔴 Paina mikrofonia nauhoittaaksesi:")
 wav_audio_data = audio_recorder(
-    text="",  # Ei tekstiä napin sisällä, vain ikoni
+    text="",
     recording_color="#e8b62c",
     neutral_color="#6aa36f",
     icon_name="microphone",
-    icon_size="3x", # Iso mikrofoni
+    icon_size="3x",
 )
-# ----------------------------------------
 
 if wav_audio_data is not None:
-    # Näytetään soitin, jotta voi tarkistaa nauhoituksen
     st.audio(wav_audio_data, format='audio/wav')
     
-    st.subheader("2. Lähetä muisto talteen")
+    puhuja = st.text_input("Kuka puhuu?", placeholder="esim. Mummo")
     
-    with st.form("send_form"):
-        recipient = st.text_input("Mihin sähköpostiin muisto lähetetään?", placeholder="esim. matti@suku.fi")
-        submitted = st.form_submit_button("📤 LÄHETÄ MUISTO")
-        
-        if submitted and recipient:
-            with st.spinner("Lähetetään muistoa..."):
-                success = send_email(
-                    recipient, 
-                    f"Sukumuisto: {st.session_state['current_question']}", 
-                    "Tässä on uusi nauhoitettu tarina liitteenä.", 
-                    wav_audio_data
-                )
+    if st.button("💾 TALLENNA MUISTO"):
+        if not puhuja:
+            st.warning("Kirjoita puhujan nimi ensin.")
+        else:
+            with st.spinner("Tallennetaan pilveen..."):
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d")
+                short_q = st.session_state['current_question'][:15].replace(" ", "_").replace("?", "")
+                # Muotoillaan nimi selkeäksi: Pvm - Puhuja - Aihe
+                filename = f"{timestamp} - {puhuja} - {short_q}.wav"
+                
+                success = save_to_drive(wav_audio_data, filename)
+                
                 if success:
                     st.balloons()
-                    st.success("Muisto lähetetty onnistuneesti sähköpostiin!")
+                    st.success("Tallennettu! Muisto ilmestyy pian alas listaan.")
+                    # Tyhjennetään välimuisti, jotta uusi tiedosto näkyy heti
+                    st.cache_data.clear()
 
+st.divider()
 
+# --- NÄYTÄ GALLERIA ---
+# Tämä lataa ja näyttää tiedostot sivun alalaidassa
+list_and_play_files()
