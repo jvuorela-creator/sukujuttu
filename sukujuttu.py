@@ -1,17 +1,15 @@
 import streamlit as st
-from st_audiorec import st_audiorec
+from audio_recorder_streamlit import audio_recorder # <--- TÄMÄ VAIHTUI
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
-import datetime
 import random
 
 # --- ASETUKSET ---
 st.set_page_config(page_title="Sukumuistot", page_icon="🎙️")
 
-# Kysymyslista (näitä voi olla satoja)
 KYSYMYKSET = [
     "Kuka oli paras ystäväsi lapsuudessa?",
     "Mitä söitte jouluna, kun olit pieni?",
@@ -24,8 +22,12 @@ KYSYMYKSET = [
 # --- SÄHKÖPOSTIN LÄHETYSFUNKTIO ---
 def send_email(recipient_email, subject, body, audio_data):
     # Nämä haetaan piilotetuista asetuksista (st.secrets)
-    sender_email = st.secrets["EMAIL_USER"]
-    password = st.secrets["EMAIL_PASSWORD"]
+    try:
+        sender_email = st.secrets["EMAIL_USER"]
+        password = st.secrets["EMAIL_PASSWORD"]
+    except FileNotFoundError:
+        st.error("Sähköpostiasetukset (secrets) puuttuvat!")
+        return False
 
     msg = MIMEMultipart()
     msg['From'] = sender_email
@@ -54,43 +56,42 @@ def send_email(recipient_email, subject, body, audio_data):
 
 # --- KÄYTTÖLIITTYMÄ ---
 
-# Otsikko isosti
 st.markdown("<h1 style='text-align: center; color: #2E86C1;'>🎙️ Sukumuistot Talteen</h1>", unsafe_allow_html=True)
-
 st.divider()
 
-# Päivän kysymyksen logiikka (arvotaan päivän mukaan tai satunnaisesti)
-# Tässä yksinkertaistettu versio: Satunnainen kysymys napin painalluksella
 if 'current_question' not in st.session_state:
     st.session_state['current_question'] = random.choice(KYSYMYKSET)
 
 if st.button("🔄 Vaihda kysymys"):
     st.session_state['current_question'] = random.choice(KYSYMYKSET)
 
-# Kysymys VALTAVALLA fontilla
 st.markdown(f"""
-<div style='background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center;'>
+<div style='background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;'>
     <h2 style='color: #333;'>{st.session_state['current_question']}</h2>
 </div>
 """, unsafe_allow_html=True)
 
-st.write("") # Tyhjää tilaa
-
 # --- NAUHOITUS ---
 st.subheader("1. Nauhoita vastaus")
-st.info("Paina punaista nappia aloittaaksesi ja lopettaaksesi.")
+st.write("Klikkaa mikrofonia nauhoittaaksesi. Klikkaa uudestaan lopettaaksesi.")
 
-# Tämä luo nauhoitusnapin
-wav_audio_data = st_audiorec()
+# --- TÄMÄ OSA VAIHTUI (Uusi kirjasto) ---
+wav_audio_data = audio_recorder(
+    text="",  # Ei tekstiä napin sisällä, vain ikoni
+    recording_color="#e8b62c",
+    neutral_color="#6aa36f",
+    icon_name="microphone",
+    icon_size="3x", # Iso mikrofoni
+)
+# ----------------------------------------
 
-# --- LÄHETYS ---
 if wav_audio_data is not None:
-    st.success("Nauhoitus onnistui! Voit kuunnella sen yläpuolelta.")
+    # Näytetään soitin, jotta voi tarkistaa nauhoituksen
+    st.audio(wav_audio_data, format='audio/wav')
     
     st.subheader("2. Lähetä muisto talteen")
     
     with st.form("send_form"):
-        # Vastaanottajan sähköposti (voi olla oma tai sukulaisen)
         recipient = st.text_input("Mihin sähköpostiin muisto lähetetään?", placeholder="esim. matti@suku.fi")
         submitted = st.form_submit_button("📤 LÄHETÄ MUISTO")
         
