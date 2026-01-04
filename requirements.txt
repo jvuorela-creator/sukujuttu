@@ -1,2 +1,2 @@
 streamlit
-streamlit-audiorecython-client
+audio-recorder-streamlit
