@@ -87,19 +87,21 @@ def list_and_play_files():
         # Loopataan tiedostot läpi
         for item in items:
             with st.expander(f"📁 {item['name']}"):
-                # Ladataan ääni muistiin
-                request = service.files().get_media(fileId=item['id'])
-                fh = io.BytesIO()
-                downloader = MediaIoBaseDownload(fh, request)
-                done = False
-                while done is False:
-                    status, done = downloader.next_chunk()
-                
-                # Soitetaan ääni
-                st.audio(fh.getvalue(), format="audio/wav")
+                try:
+                    # --- KORJAUS ALKAA ---
+                    # Ladataan tiedosto suoraan muistiin yhtenä könttinä
+                    # Tämä välttää "seekable bit stream" -virheen
+                    file_content = service.files().get_media(fileId=item['id']).execute()
+                    
+                    # Soitetaan ääni
+                    st.audio(file_content, format="audio/wav")
+                    # --- KORJAUS LOPPUU ---
+                    
+                except Exception as e:
+                    st.error(f"Virhe tämän tiedoston toistossa: {e}")
 
     except Exception as e:
-        st.error(f"Virhe tiedostojen lataamisessa: {e}")
+        st.error(f"Virhe tiedostolistan hakemisessa: {e}")
 
 # --- KÄYTTÖLIITTYMÄ ---
 
@@ -158,3 +160,4 @@ st.divider()
 # --- NÄYTÄ GALLERIA ---
 # Tämä lataa ja näyttää tiedostot sivun alalaidassa
 list_and_play_files()
+
