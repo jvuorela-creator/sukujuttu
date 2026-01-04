@@ -7,6 +7,16 @@ from email.mime.text import MIMEText
 from email import encoders
 import random
 
+# --- DEBUG ALKAA (poista tämä kun toimii) ---
+try:
+    user = st.secrets["EMAIL_USER"]
+    pwd = st.secrets["EMAIL_PASSWORD"]
+    st.warning(f"DEBUG: Yritetään lähettää tililtä: {user}")
+    st.warning(f"DEBUG: Salasanan pituus on: {len(pwd)} merkkiä (pitäisi olla 16)")
+except Exception as e:
+    st.error(f"DEBUG VIRHE: Asetuksia ei löydy! {e}")
+# --- DEBUG LOPPU ---
+
 # --- ASETUKSET ---
 st.set_page_config(page_title="Sukumuistot", page_icon="🎙️")
 
@@ -106,3 +116,4 @@ if wav_audio_data is not None:
                 if success:
                     st.balloons()
                     st.success("Muisto lähetetty onnistuneesti sähköpostiin!")
+
