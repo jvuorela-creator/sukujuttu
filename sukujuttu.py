@@ -31,7 +31,6 @@ KYSYMYKSET = [
 
 # --- SÄHKÖPOSTIN LÄHETYSFUNKTIO ---
 def send_email(recipient_email, subject, body, audio_data):
-    # Nämä haetaan piilotetuista asetuksista (st.secrets)
     try:
         sender_email = st.secrets["EMAIL_USER"]
         password = st.secrets["EMAIL_PASSWORD"]
@@ -53,14 +52,19 @@ def send_email(recipient_email, subject, body, audio_data):
     msg.attach(part)
 
     try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        # --- MUUTOS ALKAA TÄSTÄ ---
+        # Käytetään SMTP_SSL ja porttia 465. Tämä on varmempi tapa pilvessä.
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        # Huom: server.starttls() -komentoa EI tarvita tässä.
+        
         server.login(sender_email, password)
         text = msg.as_string()
         server.sendmail(sender_email, recipient_email, text)
         server.quit()
+        # --- MUUTOS LOPPUU ---
         return True
     except Exception as e:
+        # Tulostetaan tarkempi virheilmoitus ruudulle
         st.error(f"Virhe lähetyksessä: {e}")
         return False
 
@@ -116,4 +120,5 @@ if wav_audio_data is not None:
                 if success:
                     st.balloons()
                     st.success("Muisto lähetetty onnistuneesti sähköpostiin!")
+
 
